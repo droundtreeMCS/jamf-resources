@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# Define your Jamf Pro server URL and credentials
+jamfProURL="https://mchristian.jamfcloud.com"
+jamfProUsername="droundtree"
+jamfProPassword="Droundadmin19!"
+apiEndpoint="https://mchristian.jamfcloud.com/JSSResource/computers/serialnumber"
+computerID=$(system_profiler SPHardwareDataType | awk '/Serial Number/{print $NF}')
+
+
+username=$jamfProUsername
+password=$jamfProPassword
+url="https://mchristian.jamfcloud.com"
+
+#Variable declarations
+bearerToken=""
+tokenExpirationEpoch="0"
+
+getBearerToken() {
+	response=$(curl -s -u "$username":"$password" "$url"/api/v1/auth/token -X POST)
+	bearerToken=$(echo "$response" | plutil -extract token raw -)
+	tokenExpiration=$(echo "$response" | plutil -extract expires raw - | awk -F . '{print $1}')
+	tokenExpirationEpoch=$(date -j -f "%Y-%m-%dT%T" "$tokenExpiration" +"%s")
+}
+
+checkTokenExpiration() {
+    nowEpochUTC=$(date -j -f "%Y-%m-%dT%T" "$(date -u +"%Y-%m-%dT%T")" +"%s")
+    if [[ tokenExpirationEpoch -gt nowEpochUTC ]]
+    then
+        echo "Token valid until the following epoch time: " "$tokenExpirationEpoch"
+    else
+        echo "No valid token available, getting new token"
+        getBearerToken
+    fi
+}
+
+invalidateToken() {
+	responseCode=$(curl -w "%{http_code}" -H "Authorization: Bearer ${bearerToken}" $url/api/v1/auth/invalidate-token -X POST -s -o /dev/null)
+	if [[ ${responseCode} == 204 ]]
+	then
+		echo "Token successfully invalidated"
+		bearerToken=""
+		tokenExpirationEpoch="0"
+	elif [[ ${responseCode} == 401 ]]
+	then
+		echo "Token already invalid"
+	else
+		echo "An unknown error occurred invalidating the token"
+	fi
+}
+
+checkTokenExpiration
+
+echo "Token: $bearerToken"
+
+# Check if API token generation was successful
+if [[ -n "$bearerToken" ]]; then
+    # Retrieve computer name from Jamf Pro API
+    # computerName=$(curl -H "Authorization: Bearer $bearerToken" "$apiEndpoint/$computerID" | xpath "//computer/general/name" 2>/dev/null | sed -e 's/<name>//g' -e 's/<\/name>//g')
+    # echo "Computer Name: $computerName"
+
+    # Retrieve asset tag from Jamf Pro API
+    echo "Getting Asset Tag with SN: $computerID"
+    assetTag=$(curl -H "Authorization: Bearer $bearerToken" -H "Accept: application/json" "$apiEndpoint/$computerID"  | grep -o '"asset_tag":"[^"]*' | sed 's/"asset_tag":"//')
+    echo "Asset Tag: $assetTag"
+
+    # Check if asset tag is retrieved successfully
+    if [[ -n "$assetTag" ]]; then
+        # Set the desired hostname
+        desiredHostname="$assetTag"
+
+        # Get the current hostname
+        currentHostname=$(scutil --get ComputerName)
+
+        # Check if the current hostname matches the desired hostname
+        if [[ "$currentHostname" != "$desiredHostname" ]]; then
+            # Set the desired hostname
+            scutil --set ComputerName "$desiredHostname"
+            scutil --set LocalHostName "$desiredHostname"
+            scutil --set HostName "$desiredHostname"
+
+            # Update the Jamf Pro inventory to reflect the new hostname
+            jamf recon
+            
+            invalidateToken
+
+            echo "Hostname has been set to $desiredHostname"
+        else
+            echo "Hostname is already set to $desiredHostname"
+        fi
+    else
+        echo "Failed to retrieve asset tag from Jamf Pro"
+    fi
+else
+    echo "Failed to generate API token. Please check your Jamf Pro credentials."
+fi

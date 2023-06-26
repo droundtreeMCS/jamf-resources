@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # Define your Jamf Pro server URL and credentials
-jamfProURL="https://mchristian.jamfcloud.com"
-jamfProUsername="droundtree"
-jamfProPassword="Droundadmin19!"
-apiEndpoint="https://mchristian.jamfcloud.com/JSSResource/computers/serialnumber"
+jamfProURL="https://<YOUR_JAMF_PRO_URL>.jamfcloud.com"
+jamfProUsername="<USERNAME>"
+jamfProPassword="<PASSWORD>"
+apiEndpoint="$jamfProURL/JSSResource/computers/serialnumber"
 computerID=$(system_profiler SPHardwareDataType | awk '/Serial Number/{print $NF}')
 
 
 username=$jamfProUsername
 password=$jamfProPassword
-url="https://mchristian.jamfcloud.com"
+url=$jamfProURL
 
 #Variable declarations
 bearerToken=""
